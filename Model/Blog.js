@@ -5,11 +5,9 @@ const Schema = mongoose.Schema;
 const sectionSchema = new Schema({
     subHeader: {
         type: String,
-        required: true
     },
     description: {
         type: String,
-        required: true
     }
 });
 
@@ -29,7 +27,6 @@ const blogSchema = new Schema({
     },
     imageCaption: {
         type: String,
-        required: false
     },
     introduction: {
         type: String,

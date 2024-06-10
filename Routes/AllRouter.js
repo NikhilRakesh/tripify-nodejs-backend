@@ -9,53 +9,54 @@ const cron = require('node-cron');
 
 
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => {   
-      cb(null, 'uploads/'); // Specify the destination directory
+  destination: (req, file, cb) => {
+    cb(null, 'uploads/'); // Specify the destination directory
   },
   filename: (req, file, cb) => {
-      const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-      cb(null, uniqueSuffix + '-' + file.originalname); // Generate a unique filename
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, uniqueSuffix + '-' + file.originalname); // Generate a unique filename
   }
 });
 
 const upload = multer({ storage: storage });
 
 // create blog for male
-router.post("/blog",  upload.any(), async (req, res) => {
+router.post("/blog", upload.any(), async (req, res) => {
   try {
-    
-    const blogs = Object.values(JSON.parse(JSON.stringify(req.body)));   
-    
+
+    const blogs = Object.values(JSON.parse(JSON.stringify(req.body)));
+
 
     const savedBlogs = await Promise.all(blogs.map(async (blogData, index) => {
       const file = req.files.find(f => f.fieldname === `${index}[image]`);
       if (file) {
-          blogData.image = `https://triifyme.in:8000/uploads/${file.filename}`;
+        blogData.image = `https://tripifyme.in:/uploads/${file.filename}`;
       }
-      blogData.sections = blogData.sections.map(section => ({
-          subHeader: section.subHeader,
-          description: section.description
-      }));
-      
+
+      blogData.sections = blogData.sections ? blogData.sections.map(section => ({
+        subHeader: section.subHeader || '',
+        description: section.description || ''
+      })) : [];
+
       // Convert `male` to a boolean value
       blogData.male = blogData.male === 'true'; // Convert 'true' string to true, and 'false' string to false
-      
+      console.log(typeof (blogData.introduction));
       blogData.introduction = String(blogData.introduction);
       blogData.author = String(blogData.author);
       blogData.header = String(blogData.header);
-  
-      return blogData;
-  }));
-console.log(savedBlogs);
-const newBlog = new Blog({ blogs: savedBlogs });
 
-await newBlog.save();
+      return blogData;
+    }));
+
+    const newBlog = new Blog({ blogs: savedBlogs });
+
+    await newBlog.save();
     res.status(201).json();
   } catch (error) {
     console.error("Error saving blog:", error);
     res.status(500).json({ message: "Error saving blog" });
   }
-}); 
+});
 
 
 // all blogs
@@ -126,7 +127,7 @@ router.put("/enquiry/:id", async (req, res) => {
     }
 
     enquiry.status = true;
-    enquiry.expiresAt = new Date(Date.now() + 24*60*60*1000); 
+    enquiry.expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
     await enquiry.save();
 
