@@ -2,38 +2,39 @@ require('dotenv').config();
 const express = require('express');
 const app = express();
 const cors = require('cors');
-const port = 8000; 
-const  bodyParser = require("body-parser");
+const port = 8000;
+const bodyParser = require("body-parser");
 const mongoose = require('mongoose');
-const morgan = require('morgan')
-const routers = require('./Routes/AllRouter')
+const morgan = require('morgan');
+const routers = require('./Routes/AllRouter');
 const path = require('path');
 
+
 app.use(cors({
-    credentials: true,
-origin:[
-    "http://localhost:5173",  
-      "http://localhost",
-      "https://tripifyme.in:8000",
-      "https://tripifyme.in"
-]
+  origin: true,
+  methods: ['GET', 'POST', 'DELETE'],
+  credentials: true
 }));
 
-app.use(express.json()); 
+app.use(express.json());
 app.use(bodyParser.json({ limit: "30mb", extended: true }));
 app.use(bodyParser.urlencoded({ limit: "30mb", extended: true }));
 app.use(morgan("dev"));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-app.use('/api',routers)
-const dbURI = process.env.DB_URI; 
-console.log('DB_URI:', dbURI);
+app.use('/api', routers);
 
-// test api
+const dbURI = process.env.DB_URI;
+
+// Test API
 app.get('/', (req, res) => {
   res.send('Hello, its tripify!');
-});  
+});
 
+app.post('/paymentSuccess', (req, res) => {
+  console.log('paymentSuccess triggered');
+  res.redirect('https://tripifyme.in/Payment-Form');
+});
 
 mongoose.connect(dbURI)
   .then(() => {

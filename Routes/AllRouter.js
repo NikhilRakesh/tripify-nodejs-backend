@@ -2,10 +2,28 @@ const express = require("express");
 const router = express.Router();
 const Blog = require("../Model/Blog");
 const enquirySchema = require("../Model/EnquirySchema");
+const PhotoGallerySchema = require("../Model/PhotoGallerySchema");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 const cron = require('node-cron');
+const nodemailer = require('nodemailer');
+const crypto = require('crypto');
+const axios = require('axios');
+const uniqid = require('uniqid');
+const store = require('store2');
+
+const transporter = nodemailer.createTransport({
+  service: 'gmail', // Use your email service (e.g., 'gmail', 'outlook', etc.)
+  auth: {
+    user: 'tripifymeenquiry@gmail.com',
+    pass: 'mhvh irwx myvd btfq',
+  },
+});
+
+const merchantId = 'YOUR_MERCHANT_ID';
+const saltKey = 'YOUR_SALT_KEY';
+const phonePeUrl = 'https://api.phonepe.com/apis/hermes/payments/initiate';
 
 
 const storage = multer.diskStorage({
@@ -30,7 +48,7 @@ router.post("/blog", upload.any(), async (req, res) => {
     const savedBlogs = await Promise.all(blogs.map(async (blogData, index) => {
       const file = req.files.find(f => f.fieldname === `${index}[image]`);
       if (file) {
-        blogData.image = `https://tripifyme.in:/uploads/${file.filename}`;
+        blogData.image = `https://tripifyme.in/uploads/${file.filename}`;
       }
 
       blogData.sections = blogData.sections ? blogData.sections.map(section => ({
@@ -93,11 +111,26 @@ router.delete("/blog/:id", async (req, res) => {
 router.post("/enquiry", async (req, res) => {
   try {
     const { name, phone } = req.body;
-    // Create a new enquiry
+
     const newEnquiry = new enquirySchema({ name, phone });
     await newEnquiry.save();
 
-    res.status(201).json({ message: "Enquiry submitted successfully!" });
+    const mailOptions = {
+      from: 'tripifymeenquiry@gmail.com',
+      to: 'sale@tripifyme.com', // The recipient's email address
+      subject: 'New Enquiry Received',
+      text: `You have received a new enquiry from:\n\nName: ${name}\nPhone: ${phone}`,
+    };
+
+    transporter.sendMail(mailOptions, (error, info) => {
+      if (error) {
+        console.error('Error sending email:', error);
+        return res.status(500).json({ message: 'Enquiry submitted but email not sent' });
+      }
+      console.log('Email sent:', info.response);
+      res.status(201).json({ message: 'Enquiry submitted successfully!' });
+    });
+
   } catch (error) {
     console.error("Error submitting enquiry:", error);
     res.status(500).json({ message: "Error submitting enquiry" });
@@ -116,20 +149,15 @@ router.get("/enquiry", async (req, res) => {
 });
 
 // complete the enquiry
-router.put("/enquiry/:id", async (req, res) => {
+router.delete("/enquiry/:id", async (req, res) => {
   const { id } = req.params;
 
   try {
-    const enquiry = await enquirySchema.findById(id);
+    const enquiry = await enquirySchema.findByIdAndDelete(id);
 
     if (!enquiry) {
       return res.status(404).json({ message: "Enquiry not found" });
     }
-
-    enquiry.status = true;
-    enquiry.expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
-
-    await enquiry.save();
 
     res.status(200).json({ message: "Enquiry status updated successfully" });
   } catch (error) {
@@ -180,5 +208,163 @@ cron.schedule('0 0 * * *', async () => {
   }
 });
 
+router.post('/initiatePayment', (req, res) => {
+  console.log('initiatePayment');
+  const { amount } = req.body;
+  const transactionId = 'txn_' + new Date().getTime();
+  const callbackUrl = 'http://localhost:5173/api/paymentCallback';
 
-module.exports = router;
+  const payload = {
+    merchantId,
+    transactionId,
+    amount,
+    callbackUrl,
+  };
+
+  const payloadString = JSON.stringify(payload);
+  const checksum = crypto.createHash('sha256').update(payloadString + saltKey).digest('hex');
+
+  res.json({
+    url: phonePeUrl,
+    payload: payloadString,
+    checksum,
+  });
+});
+
+router.post('/paymentCallback', (req, res) => {
+  console.log('paymentCallback');
+  const response = req.body;
+  const receivedChecksum = req.headers['x-checksum'];
+
+  const responsePayloadString = JSON.stringify(response);
+  const calculatedChecksum = crypto.createHash('sha256').update(responsePayloadString + saltKey).digest('hex');
+
+  if (receivedChecksum === calculatedChecksum) {
+    // Handle payment success or failure
+    res.status(200).send('Payment verified successfully');
+  } else {
+    res.status(400).send('Checksum verification failed');
+  }
+});
+
+router.post('/photos', upload.single('image'), async (req, res) => {
+  try {
+    const { caption } = req.body;
+
+    const photoPath = `https://tripifyme.in/uploads/${req.file.filename}`;
+
+    const newPhoto = new PhotoGallerySchema({
+      src: photoPath,
+      caption
+    });
+
+    await newPhoto.save();
+
+    res.status(201).json({ message: 'Photo uploaded successfully', newPhoto });
+  } catch (error) {
+    console.error('Error uploading photo:', error);
+    res.status(500).json({ message: 'Failed to upload photo' });
+  }
+});
+
+router.get('/photos', async (req, res) => {
+  try {
+    const photos = await PhotoGallerySchema.find();
+    res.status(200).json(photos);
+  } catch (error) {
+    console.error('Error fetching photos:', error);
+    res.status(500).json({ message: 'Failed to fetch photos' });
+  }
+});
+
+router.delete('/photos/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Find the photo by ID and delete it
+    const photo = await PhotoGallerySchema.findByIdAndDelete(id);
+
+    if (!photo) {
+      return res.status(404).json({ message: 'Photo not found' });
+    }
+
+    const filePath = path.join(__dirname, '..', 'uploads', path.basename(photo.src));
+    fs.unlink(filePath, (err) => {
+      if (err) {
+        console.error('Failed to delete file:', err);
+      }
+    });
+
+    res.status(200).json({ message: 'Photo deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting photo:', error);
+    res.status(500).json({ message: 'Failed to delete photo' });
+  }
+});
+
+router.post('/createTransaction', async (req, res) => {
+  const { amount, userId, name } = req.body;
+
+  const PHONEPE_MERCHANT_ID = 'M22OQET3GXNNO';
+  const PHONEPE_SALT_KEY = 'b0e9efc3-a561-41f8-94e7-022588e8e6f6';
+  // const PHONEPE_API_URL = 'https://api-preprod.phonepe.com/apis/pg-sandbox ';
+  const PHONEPE_API_URL = 'https://api.phonepe.com/apis/hermes';
+  const PHONEPE_KEY_INDEX = 1;
+
+
+  let tx_uuid = uniqid();
+  store.set('uuid', { tx: tx_uuid });
+  
+  let normalPayLoad = {
+    merchantId: PHONEPE_MERCHANT_ID,
+    merchantTransactionId: tx_uuid,
+    merchantUserId: userId,
+    name: name,
+    amount: amount * 100, // Amount in paise
+    redirectUrl: "https://tripifyme.in/api/paymentSuccess",
+    redirectMode: "POST",
+    mobileNumber: "8891268078",
+    paymentInstrument: {
+      type: "PAY_PAGE"
+    }
+  };
+
+  let bufferObj = JSON.stringify(normalPayLoad);
+  let base64String = Buffer.from(bufferObj).toString("base64");
+
+  let string = base64String + '/pg/v1/pay' + PHONEPE_SALT_KEY;
+
+  let sha256_val = crypto.createHash('sha256').update(string).digest('hex');
+  let checksum = sha256_val + '###' + PHONEPE_KEY_INDEX;
+
+  axios.post(`${PHONEPE_API_URL}/pg/v1/pay`, {
+    request: base64String
+  }, {
+    headers: {
+      'Content-Type': 'application/json',
+      'X-VERIFY': checksum,
+      'accept': 'application/json'
+    }
+  }).then(function (response) {
+    console.log('Response:', response.data);
+    if (response.data.success && response.data.data && response.data.data.instrumentResponse && response.data.data.instrumentResponse.redirectInfo) {
+      res.json({
+        success: true,
+        data: {
+          paymentUrl: response.data.data.instrumentResponse.redirectInfo.url
+        }
+      });
+    } else {
+      res.json({ success: false, message: 'Failed to get redirect URL from PhonePe' });
+    }
+  }).catch(function (error) {
+    console.error('Error in createTransaction:', error.message);
+    if (error.response) {
+      console.error('Response data:', error.response.data);
+    }
+    res.status(500).json({ error: error.message, details: error.response?.data });
+  });
+});
+
+
+module.exports = router;   
